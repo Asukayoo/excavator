@@ -1,0 +1,9 @@
+/build/
+/out/
+/.vs/
+/can_logs/
+/log/
+.clangd
+/.cache/
+__pycache__/
+cmd.md

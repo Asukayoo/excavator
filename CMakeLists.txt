@@ -1,6 +1,30 @@
 cmake_minimum_required(VERSION 3.20)
 project(robot_control LANGUAGES CXX)
 
+# 根据目标平台归一化 amd64 / arm64（交叉编译时以 CMAKE_SYSTEM_PROCESSOR 为准）。
+string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _robot_proc)
+if(_robot_proc MATCHES "^(x86_64|amd64)$")
+    set(ROBOT_CONTROL_ARCH "amd64")
+elseif(_robot_proc MATCHES "^(aarch64|arm64)$")
+    set(ROBOT_CONTROL_ARCH "arm64")
+else()
+    set(ROBOT_CONTROL_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
+    message(WARNING
+        "CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR} 非典型 amd64/arm64；若为交叉编译请检查工具链。")
+endif()
+message(STATUS "robot_control 目标架构: ${ROBOT_CONTROL_ARCH}")
+
+if(APPLE)
+    string(LENGTH "${CMAKE_OSX_ARCHITECTURES}" _robot_osx_arch_len)
+    if(_robot_osx_arch_len EQUAL 0)
+        if(ROBOT_CONTROL_ARCH STREQUAL "arm64")
+            set(CMAKE_OSX_ARCHITECTURES arm64 CACHE STRING "macOS 单架构" FORCE)
+        elseif(ROBOT_CONTROL_ARCH STREQUAL "amd64")
+            set(CMAKE_OSX_ARCHITECTURES x86_64 CACHE STRING "macOS 单架构" FORCE)
+        endif()
+    endif()
+endif()
+
 include(CTest)
 
 set(CMAKE_CXX_STANDARD 17)

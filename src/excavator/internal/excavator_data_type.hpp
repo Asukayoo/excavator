@@ -83,7 +83,7 @@ public:
     Vector8d velocity_scalar = Vector8d::Zero();
     Vector12i status = Vector12i::Zero();
     Vector8d motor_rpm = Vector8d::Constant(kMotorSpeedRawZero);
-    Vector8d plan_rpm = Vector8d::Zero();
+    Vector8d plan_rpm = Vector8d::Constant(kMotorSpeedRawZero);
 
     std::unique_ptr<AbstractType> clone() const override {
         return std::make_unique<ExcavatorState>(*this);

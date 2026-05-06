@@ -8,6 +8,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.ticker import ScalarFormatter
 
 
 def load_matrix(file_path: Path) -> np.ndarray:
@@ -132,6 +133,11 @@ def plot_joint_windows(log_dir: Path) -> None:
         axes[3].set_xlabel(x_label)
         axes[3].grid(True, alpha=0.3)
         axes[3].legend(loc="upper right")
+        # RPM 纵轴禁用科学计数法与 offset 缩写
+        _rpm_yfmt = ScalarFormatter()
+        _rpm_yfmt.set_scientific(False)
+        _rpm_yfmt.set_useOffset(False)
+        axes[3].yaxis.set_major_formatter(_rpm_yfmt)
 
         fig.tight_layout()
 
@@ -142,7 +148,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="可视化 ref/resp 关节日志（前4关节）。")
     parser.add_argument(
         "--log-dir",
-        default="log/20260424_223445",
+        default="log/20260503_155319",
         help="日志目录，需包含 ref/resp 子目录。",
     )
     return parser.parse_args()

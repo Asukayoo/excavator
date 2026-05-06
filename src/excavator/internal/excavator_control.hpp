@@ -44,6 +44,8 @@ private:
         Vector8d velocity_ki = Vector8d::Constant(0.8);
         Vector8d velocity_kd = Vector8d::Constant(4.0);
         Vector8d velocity_scalar_max = Vector8d::Constant(kPi / 20.0);
+        // 速度标量闭环前馈：|标量|∈(dead,1] 时把归一化幅值映射到 [threshold,1]；阈值∈[0,1]
+        Vector8d feedforward_scalar_threshold = Vector8d::Zero();
     };
     PidParams loadPidParams() const;
     void applyZeroDriftCompensation(const ExcavatorState& resp,

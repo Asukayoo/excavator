@@ -3,7 +3,9 @@ version: 2
 
 # 运行配置
 # TCP 服务端地址（与 python/excavator_api_tcp_server.py 一致；也可用键 host / tcp_host）
-hostname: 192.168.110.32
+# hostname: 192.168.110.32
+hostname: 127.0.0.0
+
 port: 29753
 can_if: can0
 imu_if: can1
@@ -11,16 +13,19 @@ can_simulation: false
 # ImuCanLib 是否模拟（true=不打开 imu_if 的 PF_CAN，SHM 内为默认零姿态）
 imu_simulation: false
 can_bus_enabled: true
-save_log: false
-# 8个8维向量: 前4关节有效, 后4关节固定为0
-# 顺序: [j1, j2, j3, j4, j5, j6, j7, j8]
-# 前馈阈值见 pid_vectors 内 feedforward_scalar_threshold 行（t 取 0~1）
+# save_log: false
+save_log: true
+
+# 9个8维向量: 前4关节有效, 后4关节固定为0
+# 顺序: [j1, j2, j3, j4, j5, j20260509_2144126, j7, j8]
+# 前馈阈值：feedforward_scalar_threshold_pos/neg（标量≥0 / <0，各轴 t∈[0,1]）
 pid_vectors:
   position_kp: [2.0, 1.8, 1.6, 1.2, 0.0, 0.0, 0.0, 0.0]
   position_ki: [0.02, 0.02, 0.015, 0.01, 0.0, 0.0, 0.0, 0.0]
   position_kd: [0.1, 0.08, 0.06, 0.05, 0.0, 0.0, 0.0, 0.0]
-  velocity_kp: [1500, 1400, 1.3, 1.1, 0.0, 0.0, 0.0, 0.0]
+  velocity_kp: [1500, 2500, 1.3, 1.1, 0.0, 0.0, 0.0, 0.0]
   velocity_ki: [10, 10, 0.008, 0.008, 0.0, 0.0, 0.0, 0.0]
-  velocity_kd: [30, 30, 0.025, 0.02, 0.0, 0.0, 0.0, 0.0]
-  velocity_scalar_max: [0.1570796327, 0.1570796327, 0.1570796327, 0.1570796327, 0.0, 0.0, 0.0, 0.0]
-  feedforward_scalar_threshold: [0.4, 0.2, 0.3, 0.35, 0.0, 0.0, 0.0, 0.0]
+  velocity_kd: [30, 300, 0.025, 0.02, 0.0, 0.0, 0.0, 0.0]
+  velocity_scalar_max: [0.1570796327, 0.31415926535, 0.54977871445, 0.1570796327, 0.0, 0.0, 0.0, 0.0]
+  feedforward_scalar_threshold_pos: [0.4, 0.24, 0.3, 0.35, 0.0, 0.0, 0.0, 0.0]
+  feedforward_scalar_threshold_neg: [0.4, 0.24, 0.3, 0.35, 0.0, 0.0, 0.0, 0.0]

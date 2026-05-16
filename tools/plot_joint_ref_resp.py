@@ -7,8 +7,45 @@ import argparse
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
+from matplotlib.legend import Legend
+from matplotlib.lines import Line2D
 import numpy as np
 from matplotlib.ticker import ScalarFormatter
+
+
+def register_figure_legend_toggles(fig: Figure, legend_rows: list[tuple[Legend, list[Line2D]]]) -> None:
+    """左键点击图例行（左侧色段或标签文字）切换曲线；用 button_press 避免 twin 轴挡住 pick。"""
+    packed: list[tuple[Legend, list[tuple[Line2D, Line2D]]]] = []
+    for legend, orig_lines in legend_rows:
+        leg_handles = list(getattr(legend, "legend_handles", legend.legendHandles))
+        if len(leg_handles) != len(orig_lines):
+            continue
+        packed.append((legend, list(zip(leg_handles, orig_lines))))
+
+    def on_button_press(event):
+        if event.button != 1 or event.x is None:
+            return
+        for legend, pairs in packed:
+            if not legend.get_visible():
+                continue
+            if not legend.contains(event)[0]:
+                continue
+            texts = legend.get_texts()
+            for idx, (leg_proxy, orig_line) in enumerate(pairs):
+                on_marker = leg_proxy.contains(event)[0]
+                on_label = idx < len(texts) and texts[idx].contains(event)[0]
+                if not on_marker and not on_label:
+                    continue
+                vis = not orig_line.get_visible()
+                orig_line.set_visible(vis)
+                leg_proxy.set_alpha(1.0 if vis else 0.25)
+                if idx < len(texts):
+                    texts[idx].set_alpha(1.0 if vis else 0.25)
+                fig.canvas.draw_idle()
+                return
+
+    fig.canvas.mpl_connect("button_press_event", on_button_press)
 
 
 def load_matrix(file_path: Path) -> np.ndarray:
@@ -100,7 +137,7 @@ def plot_joint_windows(log_dir: Path) -> None:
         axes[0].plot(x, resp_pos[:, joint_idx], label="resp.position", linewidth=1.2)
         axes[0].set_ylabel("position")
         axes[0].grid(True, alpha=0.3)
-        axes[0].legend(loc="upper right")
+        leg0 = axes[0].legend(loc="upper right")
 
         axes[1].plot(x, ref_vel[:, joint_idx], label="ref.velocity", linewidth=1.2)
         axes[1].plot(x, resp_vel[:, joint_idx], label="resp.velocity", linewidth=1.2)
@@ -116,23 +153,37 @@ def plot_joint_windows(log_dir: Path) -> None:
             color="tab:green",
         )
         ax1_right.set_ylabel("velocity_scalar")
+        # twin 轴 patch 默认盖住下层，图例 picker 收不到点击
+        ax1_right.patch.set_visible(False)
         align_right_axis_zero(axes[1], ax1_right, ref_vel_scalar[:, joint_idx])
         lines_left, labels_left = axes[1].get_legend_handles_labels()
         lines_right, labels_right = ax1_right.get_legend_handles_labels()
-        axes[1].legend(lines_left + lines_right, labels_left + labels_right, loc="upper right")
+        h_vel = lines_left + lines_right
+        lbl_vel = labels_left + labels_right
+        leg1 = axes[1].legend(h_vel, lbl_vel, loc="upper right")
+        leg1.set_zorder(ax1_right.get_zorder() + 1)
 
         axes[2].plot(x, ref_acc[:, joint_idx], label="ref.acceleration", linewidth=1.2)
         axes[2].plot(x, resp_acc[:, joint_idx], label="resp.acceleration", linewidth=1.2)
         axes[2].set_ylabel("acceleration")
         axes[2].grid(True, alpha=0.3)
-        axes[2].legend(loc="upper right")
+        leg2 = axes[2].legend(loc="upper right")
 
         axes[3].plot(x, ref_plan_rpm[:, joint_idx], label="ref.plan_rpm", linewidth=1.2)
         axes[3].plot(x, ref_motor_rpm[:, joint_idx], label="ref.motor_rpm", linewidth=1.2)
         axes[3].set_ylabel("rpm")
         axes[3].set_xlabel(x_label)
         axes[3].grid(True, alpha=0.3)
-        axes[3].legend(loc="upper right")
+        leg3 = axes[3].legend(loc="upper right")
+        register_figure_legend_toggles(
+            fig,
+            [
+                (leg0, list(axes[0].get_lines())),
+                (leg1, h_vel),
+                (leg2, list(axes[2].get_lines())),
+                (leg3, list(axes[3].get_lines())),
+            ],
+        )
         # RPM 纵轴禁用科学计数法与 offset 缩写
         _rpm_yfmt = ScalarFormatter()
         _rpm_yfmt.set_scientific(False)
@@ -148,7 +199,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="可视化 ref/resp 关节日志（前4关节）。")
     parser.add_argument(
         "--log-dir",
-        default="log/20260503_155319",
+        default="log/20260509_221107",
         help="日志目录，需包含 ref/resp 子目录。",
     )
     return parser.parse_args()

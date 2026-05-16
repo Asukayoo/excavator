@@ -4,21 +4,16 @@
 
 namespace excavator {
 namespace {
-constexpr int kPidVectorCount = 8;
+constexpr int kPidVectorCount = 9;
 
-// 速度标量闭环前馈：|s|<=dead 不映射；外侧 (|s|-dead)/(1-dead)∈[0,1] 映射到 [|t|,1]
-constexpr double kFfScalarDeadband = 0.1;
+// 速度标量闭环前馈：|s|∈[0,1] 作 u，幅值 |mag|=t+(1-t)u∈[t,1]；t 由符号取正负阈值
 // 前馈原始转速：仅「偏离中性幅值增大」时限制每步变化；回摆靠近中性不限幅
 constexpr double kFfRpmSlewFraction = 0.05;
 constexpr double kFfRpmSlewNeutralEps = 1e-3;
 
-double map_scalar_for_feedforward(double s, double threshold) {
-    const double t = std::clamp(threshold, 0.0, 1.0);
-    const double a = std::abs(s);
-    if (a <= kFfScalarDeadband) {
-        return s;
-    }
-    const double u = (a - kFfScalarDeadband) / (1.0 - kFfScalarDeadband);
+double map_scalar_for_feedforward(double s, double threshold_pos, double threshold_neg) {
+    const double t = std::clamp((s >= 0.0) ? threshold_pos : threshold_neg, 0.0, 1.0);
+    const double u = std::abs(s);  // 上游已将标量限制在 [-1,1]
     const double mag = (t <= 1e-15) ? u : (t + (1.0 - t) * u);
     return (s >= 0.0) ? mag : -mag;
 }
@@ -66,7 +61,8 @@ bool ExcavatorControl::setPidVectors(const std::vector<std::vector<double>>& pid
         &params.velocity_ki,
         &params.velocity_kd,
         &params.velocity_scalar_max,
-        &params.feedforward_scalar_threshold,
+        &params.feedforward_scalar_threshold_pos,
+        &params.feedforward_scalar_threshold_neg,
     };
     for (int i = 0; i < kPidVectorCount; ++i) {
         if (pid_vectors[static_cast<std::size_t>(i)].size() != kAxisCount) {
@@ -77,7 +73,7 @@ bool ExcavatorControl::setPidVectors(const std::vector<std::vector<double>>& pid
             if (!std::isfinite(v)) {
                 return false;
             }
-            if (i == kPidVectorCount - 1) {
+            if (i >= kPidVectorCount - 2) {
                 if (v < 0.0 || v > 1.0) {
                     return false;
                 }
@@ -124,13 +120,13 @@ bool ExcavatorControl::openLoopMotorSpeed(const ExcavatorState& ref_in,
     ref_out.position = resp.position;
     ref_out.velocity = resp.velocity;
     ref_out.acceleration = resp.acceleration;
-    ref_out.plan_rpm.setConstant(kMotorSpeedRawZero);
     if (cmd_in) {
         ref_out.velocity_scalar = cmd_in->speed_scalar.array().max(-1.0).min(1.0).matrix();
     }
     for (int i = 0; i < kAxisCount; ++i) {
         ref_out.motor_rpm(i) = scalar_to_motor_rpm_by_joint(i, ref_out.velocity_scalar(i));
     }
+    ref_out.plan_rpm = ref_out.motor_rpm;
     return true;
 }
 
@@ -153,15 +149,21 @@ bool ExcavatorControl::closedLoopJointPosition(const ExcavatorState& ref_in,
         const double vmax = std::max(params.velocity_scalar_max(i), 1e-6);
         ref_out.velocity_scalar(i) = std::clamp(ref_out.velocity(i) / vmax, -1.0, 1.0);
     }
+    const double ff_span = kMotorSpeedRawMax - kMotorSpeedRawZero;
+    const double ff_d_up = kFfRpmSlewFraction * ff_span;
+    const double ff_d_down = ff_d_up;
 
     for (int i = 0; i < kAxisCount; ++i) {
-        const double rpm_ff = scalar_to_motor_rpm_by_joint(i, ref_out.velocity_scalar(i));
+        const double s_ff = map_scalar_for_feedforward(ref_out.velocity_scalar(i), params.feedforward_scalar_threshold_pos(i),
+                                                       params.feedforward_scalar_threshold_neg(i));
+        const double tgt = scalar_to_motor_rpm_by_joint(i, s_ff);
+        const double rpm_ff = slew_feedforward_motor_rpm(tgt, ref_in.motor_rpm(i), ff_d_up, ff_d_down);
         const double e = ref_out.position(i) - resp.position(i);
         double delta_rpm = params.position_kp(i) * (e - pid_e_prev_(i)) + params.position_ki(i) * e +
                            params.position_kd(i) * (e - 2.0 * pid_e_prev_(i) + pid_e_prev2_(i));
         delta_rpm = std::clamp(delta_rpm, -kDeltaRpmLimit, kDeltaRpmLimit);
         const double rpm_extra = pid_extra_prev_(i) + delta_rpm;
-        ref_out.motor_rpm(i) = std::clamp(rpm_ff, kMotorSpeedRawMin, kMotorSpeedRawMax);
+        ref_out.motor_rpm(i) = rpm_ff;
         ref_out.plan_rpm(i) = std::clamp(ref_out.motor_rpm(i) + rpm_extra, kMotorSpeedRawMin, kMotorSpeedRawMax);
         pid_e_prev2_(i) = pid_e_prev_(i);
         pid_e_prev_(i) = e;
@@ -189,16 +191,22 @@ bool ExcavatorControl::closedLoopJointVelocity(const ExcavatorState& ref_in,
         const double vmax = std::max(params.velocity_scalar_max(i), 1e-6);
         ref_out.velocity_scalar(i) = std::clamp(ref_out.velocity(i) / vmax, -1.0, 1.0);
     }
+    const double ff_span = kMotorSpeedRawMax - kMotorSpeedRawZero;
+    const double ff_d_up = kFfRpmSlewFraction * ff_span;
+    const double ff_d_down = ff_d_up;
 
     for (int i = 0; i < kAxisCount; ++i) {
-        const double rpm_ff = scalar_to_motor_rpm_by_joint(i, ref_out.velocity_scalar(i));
+        const double s_ff = map_scalar_for_feedforward(ref_out.velocity_scalar(i), params.feedforward_scalar_threshold_pos(i),
+                                                       params.feedforward_scalar_threshold_neg(i));
+        const double tgt = scalar_to_motor_rpm_by_joint(i, s_ff);
+        const double rpm_ff = slew_feedforward_motor_rpm(tgt, ref_in.motor_rpm(i), ff_d_up, ff_d_down);
         const double e_vel = ref_out.velocity(i) - resp.velocity(i);
         const double e = e_vel;
         double delta_rpm = params.velocity_kp(i) * (e - pid_e_prev_(i)) + params.velocity_ki(i) * e +
                            params.velocity_kd(i) * (e - 2.0 * pid_e_prev_(i) + pid_e_prev2_(i));
         delta_rpm = std::clamp(delta_rpm, -kDeltaRpmLimit, kDeltaRpmLimit);
         const double rpm_extra = pid_extra_prev_(i) + delta_rpm;
-        ref_out.motor_rpm(i) = std::clamp(rpm_ff, kMotorSpeedRawMin, kMotorSpeedRawMax);
+        ref_out.motor_rpm(i) = rpm_ff;
         ref_out.plan_rpm(i) = std::clamp(ref_out.motor_rpm(i) + rpm_extra, kMotorSpeedRawMin, kMotorSpeedRawMax);
         pid_e_prev2_(i) = pid_e_prev_(i);
         pid_e_prev_(i) = e;
@@ -222,6 +230,19 @@ bool ExcavatorControl::closedLoopVelocityScalar(const ExcavatorState& ref_in,
     Vector8d ref_scalar_c = cmd_in->speed_scalar.array().max(-1.0).min(1.0).matrix();
     applyZeroDriftCompensation(resp, ref_scalar_c, resp_velocity_c, ref_scalar_c);
 
+    // 5Hz 一阶低通（仅 PID 反馈通路，不写入 resp）
+    constexpr double kRespVelLpFcHz = 5.0;
+    const double lp_beta = std::exp(-2.0 * kPi * kRespVelLpFcHz * kTs);
+    if (resp_velocity_lp_need_init_) {
+        resp_velocity_lp_ = resp_velocity_c;
+        resp_velocity_lp_need_init_ = false;
+    } else {
+        for (int i = 0; i < kAxisCount; ++i) {
+            resp_velocity_lp_(i) =
+                lp_beta * resp_velocity_lp_(i) + (1.0 - lp_beta) * resp_velocity_c(i);
+        }
+    }
+
     ref_out.velocity_scalar = ref_scalar_c;
     const double span = kMotorSpeedRawMax - kMotorSpeedRawZero;
     const double d_up = kFfRpmSlewFraction * span;
@@ -230,7 +251,8 @@ bool ExcavatorControl::closedLoopVelocityScalar(const ExcavatorState& ref_in,
         ref_out.velocity(i) = ref_out.velocity_scalar(i) * params.velocity_scalar_max(i);
     }
     for (int i = 0; i < kAxisCount; ++i) {
-        const double s_ff = map_scalar_for_feedforward(ref_scalar_c(i), params.feedforward_scalar_threshold(i));
+        const double s_ff = map_scalar_for_feedforward(ref_scalar_c(i), params.feedforward_scalar_threshold_pos(i),
+                                                       params.feedforward_scalar_threshold_neg(i));
         const double tgt = scalar_to_motor_rpm_by_joint(i, s_ff);
         // 上一拍限幅后的前馈转速来自 ref_in.motor_rpm（通道上一帧 ref）
         ref_out.motor_rpm(i) = slew_feedforward_motor_rpm(tgt, ref_in.motor_rpm(i), d_up, d_down);
@@ -240,7 +262,7 @@ bool ExcavatorControl::closedLoopVelocityScalar(const ExcavatorState& ref_in,
     prev_ref_velocity_ = ref_out.velocity;
 
     for (int i = 0; i < kAxisCount; ++i) {
-        const double e = ref_out.velocity(i) - resp_velocity_c(i);
+        const double e = ref_out.velocity(i) - resp_velocity_lp_(i);
         double delta_rpm = params.velocity_kp(i) * (e - pid_e_prev_(i)) + params.velocity_ki(i) * e +
                            params.velocity_kd(i) * (e - 2.0 * pid_e_prev_(i) + pid_e_prev2_(i));
         delta_rpm = std::clamp(delta_rpm, -kDeltaRpmLimit, kDeltaRpmLimit);
@@ -276,6 +298,7 @@ bool ExcavatorControl::updateRef(const ExcavatorState& ref_in,
         ref_scalar_bias_.setZero();
         zero_drift_count_ = 0;
         zero_drift_ready_ = false;
+        resp_velocity_lp_need_init_ = true;
     }
     switch (mode.mode) {
         case ExcavatorControlModeType::OpenLoopMotorSpeed:

@@ -240,9 +240,10 @@ bool load_runtime_config_from_yaml(const std::string& yaml_path, RuntimeConfigFr
 bool load_pid_vectors_from_yaml(const std::string& yaml_path, std::vector<std::vector<double>>& pid_vectors) {
     std::ifstream fin(yaml_path);
     if (!fin.is_open()) return false;
-    const std::vector<std::string> keys = {
-        "position_kp", "position_ki", "position_kd", "velocity_kp",
-        "velocity_ki", "velocity_kd", "velocity_scalar_max", "feedforward_scalar_threshold"};
+    const std::vector<std::string> keys = {"position_kp",      "position_ki",      "position_kd",
+                                           "velocity_kp",      "velocity_ki",      "velocity_kd",
+                                           "velocity_scalar_max", "feedforward_scalar_threshold_pos",
+                                           "feedforward_scalar_threshold_neg"};
     pid_vectors.assign(keys.size(), std::vector<double>{});
     std::string line;
     while (std::getline(fin, line)) {

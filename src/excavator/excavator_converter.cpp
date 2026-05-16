@@ -63,7 +63,8 @@ bool ExcavatorConverter::robotStateToHardwareCmd(const RobotState& state, Hardwa
         return false;
     }
     hw->status = st->status;
-    hw->motor_rpm = swap_joint_2_3_on_first4(st->motor_rpm);
+    // 闭环：plan_rpm = 前馈 motor_rpm + PID；总线下发规划转速。开环见 control 内 plan_rpm=motor_rpm。
+    hw->motor_rpm = swap_joint_2_3_on_first4(st->plan_rpm);
     return true;
 }
 

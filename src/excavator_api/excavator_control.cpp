@@ -130,7 +130,7 @@ bool ExcavatorControl::setPidVectors(const std::vector<std::vector<double>>& pid
         return false;
     }
     if (!impl_->runtime->client().setPidVectors(pid_vectors)) {
-        impl_->last_error = "PID 参数格式非法，要求 7x8 有限数值向量";
+        impl_->last_error = "PID 参数格式非法，要求 9x8 有限数值向量";
         return false;
     }
     impl_->last_error.clear();

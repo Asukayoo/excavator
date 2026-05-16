@@ -44,8 +44,9 @@ private:
         Vector8d velocity_ki = Vector8d::Constant(0.8);
         Vector8d velocity_kd = Vector8d::Constant(4.0);
         Vector8d velocity_scalar_max = Vector8d::Constant(kPi / 20.0);
-        // 速度标量闭环前馈：|标量|∈(dead,1] 时把归一化幅值映射到 [threshold,1]；阈值∈[0,1]
-        Vector8d feedforward_scalar_threshold = Vector8d::Zero();
+        // 标量前馈正负阈值∈[0,1]；|标量|∈(dead,1] 映射到 [|t|,1]，t 按符号取 pos/neg
+        Vector8d feedforward_scalar_threshold_pos = Vector8d::Zero();
+        Vector8d feedforward_scalar_threshold_neg = Vector8d::Zero();
     };
     PidParams loadPidParams() const;
     void applyZeroDriftCompensation(const ExcavatorState& resp,
@@ -69,6 +70,9 @@ private:
     mutable Vector8d ref_scalar_bias_{Vector8d::Zero()};
     mutable std::uint32_t zero_drift_count_{0};
     mutable bool zero_drift_ready_{false};
+    // 标量闭环：测量速度低通状态（不改 resp，仅反馈用）
+    mutable Vector8d resp_velocity_lp_{Vector8d::Zero()};
+    mutable bool resp_velocity_lp_need_init_{true};
 };
 
 }  // namespace excavator
